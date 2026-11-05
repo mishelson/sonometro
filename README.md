@@ -1,8 +1,10 @@
 # Sonometro: tu voz, en equilibrio
 
 Indicador visual local para Windows: cuando superas tu volumen habitual,
-los bordes de la pantalla pasan de amarillo a naranja y rojo, creciendo
-suavemente hacia dentro, como un efecto de dano en un videojuego.
+aparece un resplandor difuminado en los bordes de la pantalla que pasa
+gradualmente de verde a amarillo, naranja y rojo, creciendo hacia dentro,
+como un efecto de dano en un videojuego. Si gritas de golpe, el rojo
+aparece al instante como alarma.
 Con silencio o voz normal, los bordes permanecen ocultos.
 
 ## Instalar y ejecutar
@@ -31,18 +33,25 @@ y seguridad > Microfono.
 3. Pulsa **Calibrar mi voz**: silencio durante 3 segundos, preparacion de
    2 segundos y habla normal durante 6 segundos. Mantente a tu distancia
    habitual. Si hay saturacion o mucho ruido, se solicitara repetir.
-4. Ajusta la tolerancia: menos tolerancia avisa antes. Los tres niveles
-   comienzan en +3, +7 y +12 dB respecto a tu voz normal, desplazados por
-   el ajuste de tolerancia. Hay suavizado, histeresis y persistencia para
-   evitar destellos por picos aislados.
-5. Ajusta intensidad y profundidad. **Vista previa** muestra el efecto
+4. Ajusta la tolerancia: menos tolerancia avisa antes. Con tolerancia 0,
+   el borde aparece en verde a +3 dB respecto a tu voz normal y avanza de
+   forma continua por amarillo y naranja hasta el rojo a +12 dB; la
+   tolerancia desplaza todo el rango. El rojo gradual siempre llega antes
+   del umbral de grito, para que veas toda la escala. Hay suavizado,
+   histeresis y persistencia para evitar destellos por picos aislados.
+5. Ajusta el umbral de **Grito** (por defecto +15 dB sobre tu voz normal).
+   Si lo superas aunque sea un instante (unas 0.12 s sostenidas), el rojo
+   aparece de inmediato a plena intensidad y se mantiene 1.5 s, sin
+   importar la tolerancia. Un golpe o click aislado no basta para activarlo.
+6. Ajusta intensidad y profundidad. **Vista previa** muestra el efecto
    durante 5 segundos sin necesitar captura ni calibracion, incluso con
    las alertas desactivadas. No bloquea clics ni toma el foco.
-6. **Detener** libera el microfono. Cerrar la ventana tambien detiene
+7. **Detener** libera el microfono. Cerrar la ventana tambien detiene
    la captura; no queda ejecutandose en la bandeja del sistema.
 
 El medidor usa verde para el nivel normal, y texto ademas del color.
-La linea blanca marca la referencia personal. La escala del medidor es
+La linea blanca marca la referencia personal y la discontinua roja el
+umbral de grito. La escala del medidor es
 de -80 a 0 dBFS; las lecturas mas bajas siguen apareciendo en el texto.
 
 Los ajustes se guardan en `sonometro_config.json` junto al programa.
@@ -82,8 +91,10 @@ El audio se procesa en memoria, localmente. No se guarda, transcribe ni
 envia. Solo se conservan ajustes y referencias numericas. El microfono
 permanece abierto exclusivamente al iniciar el monitoreo.
 
-El efecto se muestra en el monitor principal con ventanas nativas sin
-activacion y que dejan pasar clics. No admite varios monitores ni garantiza
+El efecto se dibuja en el monitor principal con una unica ventana nativa
+transparente por pixel: un degradado suave con esquinas redondeadas que
+crece hacia dentro y, en rojo, late suavemente. No toma el foco y deja
+pasar clics. No admite varios monitores ni garantiza
 superposicion sobre juegos en pantalla completa exclusiva o escritorios
 protegidos de Windows. Puedes desactivar los bordes y conservar el medidor.
 
@@ -99,9 +110,11 @@ captura y se avisa en lugar de cerrar el flujo desde un hilo incorrecto.
 
 Las pruebas usan audio sintetico y dobles de captura: no abren tu microfono.
 Cubren RMS, silencio, extremos int16, incremento de +6.02 dB al duplicar
-amplitud, calibracion, limites, histeresis, ajustes y liberacion de recursos.
+amplitud, calibracion, limites, histeresis, deteccion de grito, ajustes y
+liberacion de recursos.
 En Windows tambien abren una interfaz de prueba con dispositivos simulados
-y comprueban geometria, ocultamiento, estabilidad del foco y paso de clics
+y comprueban geometria, degradado sin escalones, ocultamiento, estabilidad
+del foco y paso de clics
 de los bordes. Estas pruebas muestran el efecto brevemente en tu pantalla.
 
 Para comprobar tu equipo: usa Vista previa mientras haces clic en otra

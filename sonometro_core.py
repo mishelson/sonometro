@@ -7,7 +7,7 @@ import numpy as np
 
 
 FLOOR_DBFS = -100.0
-COLORS = ("#36c995", "#f2ca52", "#f59545", "#ed5968")
+COLORS = ("#22d37a", "#ffd21f", "#ff7a12", "#ff0a0a")
 STATE_NAMES = ("Voz normal", "Elevada", "Alta", "Muy alta")
 
 
@@ -52,6 +52,7 @@ class Settings:
     normal_dbfs: float | None = None
     spl_offset: float | None = None
     sensitivity: float = 0.0
+    shout_db: float = 15.0
     opacity: float = 0.45
     depth: float = 0.10
     overlay_enabled: bool = True
@@ -62,7 +63,8 @@ class Settings:
         if not isinstance(self.device_key, str) or type(self.overlay_enabled) is not bool:
             raise ValueError("Dispositivo o estado de alerta invalidos.")
         for name, low, high in (
-            ("sensitivity", -2, 8), ("opacity", 0.1, 0.75), ("depth", 0.02, 0.15),
+            ("sensitivity", -2, 8), ("shout_db", 6, 30),
+            ("opacity", 0.1, 0.75), ("depth", 0.02, 0.15),
             ("noise_dbfs", FLOOR_DBFS, 0), ("normal_dbfs", FLOOR_DBFS, -6),
             ("spl_offset", 0, 200),
         ):
@@ -118,27 +120,82 @@ def legacy_device_index(path: Path, available: list[int]) -> int | None:
     return index
 
 
+def alert_limits(settings: Settings) -> tuple[float, float, float]:
+    """dB above normal voice where the gradual ramp starts, turns orange and reaches red.
+
+    The ramp always completes before the shout threshold so every colour stays reachable.
+    """
+    start = 3 + settings.sensitivity
+    end = max(start + 2, min(12 + settings.sensitivity, settings.shout_db - 1))
+    return start, start + (end - start) * 4 / 9, end
+
+
+COLOR_STOPS = ((0.1, 0), (0.4, 0), (0.62, 1), (0.82, 2), (0.97, 3))
+
+
+def ramp_color(intensity: float) -> str:
+    """Green grows first as an early warning, then shifts through yellow and orange to red."""
+    stops = [(position, [int(COLORS[c][i:i + 2], 16) for i in (1, 3, 5)]) for position, c in COLOR_STOPS]
+    if intensity <= stops[0][0]:
+        rgb = stops[0][1]
+    elif intensity >= stops[-1][0]:
+        rgb = stops[-1][1]
+    else:
+        for (p0, c0), (p1, c1) in zip(stops, stops[1:]):
+            if p0 <= intensity <= p1:
+                mix = (intensity - p0) / (p1 - p0)
+                rgb = [x + (y - x) * mix for x, y in zip(c0, c1)]
+                break
+    return "#" + "".join(f"{round(channel):02x}" for channel in rgb)
+
 class LevelTracker:
+    SHOUT_CONFIRM = 0.12
+    SHOUT_HOLD = 1.5
+
     def __init__(self) -> None:
         self.level = FLOOR_DBFS
+        self.fast = FLOOR_DBFS
         self.state = 0
         self.timestamp: float | None = None
         self.candidate = 0
         self.candidate_since = 0.0
+        self.shout_time = 0.0
+        self.shout_until = -math.inf
+
+    @property
+    def shouting(self) -> bool:
+        return self.timestamp is not None and self.timestamp < self.shout_until
 
     def update(self, reading: Reading, settings: Settings) -> tuple[float, int, float]:
+        dt = 0.0
         if self.timestamp is None:
-            self.level = reading.dbfs
+            self.level = self.fast = reading.dbfs
         else:
             dt = max(0, reading.timestamp - self.timestamp)
             tau = 0.10 if reading.dbfs > self.level else 0.65
             self.level += (reading.dbfs - self.level) * (1 - math.exp(-dt / tau))
+            fast_tau = 0.03 if reading.dbfs > self.fast else 0.12
+            self.fast += (reading.dbfs - self.fast) * (1 - math.exp(-dt / fast_tau))
         self.timestamp = reading.timestamp
         if settings.normal_dbfs is None or settings.noise_dbfs is None:
             self.state = self.candidate = 0
+            self.shout_time = 0.0
+            self.shout_until = -math.inf
             return self.level, 0, 0.0
+        # A shout bypasses smoothing and tolerance: brief but sustained bursts trigger red at once.
+        if self.fast - settings.normal_dbfs >= settings.shout_db:
+            self.shout_time += dt
+            if self.shout_time >= self.SHOUT_CONFIRM:
+                self.shout_until = reading.timestamp + self.SHOUT_HOLD
+        else:
+            self.shout_time = 0.0
+        if self.shouting:
+            self.state = self.candidate = 3
+            self.candidate_since = reading.timestamp
+            return self.level, 3, 1.0
         excess = self.level - settings.normal_dbfs
-        thresholds = [3 + settings.sensitivity, 7 + settings.sensitivity, 12 + settings.sensitivity]
+        start, middle, end = alert_limits(settings)
+        thresholds = [start, middle, end]
         desired = sum(excess >= limit for limit in thresholds)
         if self.level < settings.noise_dbfs + 6:
             desired = 0
@@ -150,5 +207,8 @@ class LevelTracker:
         dwell = 0.18 if desired > self.state else 0.35
         if reading.timestamp - self.candidate_since >= dwell:
             self.state = desired
-        strength = min(1.0, max(0.12, (excess - thresholds[0] + 3) / 15)) if self.state else 0.0
-        return self.level, self.state, strength
+        if not self.state:
+            return self.level, 0, 0.0
+        # Continuous intensity: 0.1 is the first green glow at the limit, 1.0 is full red.
+        heat = min(1.0, max(0.0, (excess - start) / (end - start)))
+        return self.level, self.state, 0.1 + 0.9 * heat

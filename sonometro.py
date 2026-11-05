@@ -9,7 +9,7 @@ from tkinter import messagebox, simpledialog, ttk
 from sonometro_audio import Capture, Device, input_devices
 from sonometro_core import (
     COLORS, FLOOR_DBFS, STATE_NAMES, LevelTracker, Reading, Settings,
-    calibrate, legacy_device_index, load_settings, save_settings,
+    alert_limits, calibrate, legacy_device_index, load_settings, ramp_color, save_settings,
 )
 from sonometro_overlay import Overlay, enable_dpi_awareness
 
@@ -60,8 +60,8 @@ class App:
 
     def _build_ui(self) -> None:
         self.root.title("Sonometro | Tu voz, en equilibrio")
-        self.root.geometry("540x720")
-        self.root.minsize(500, 680)
+        self.root.geometry("540x790")
+        self.root.minsize(500, 750)
         self.root.configure(bg="#131c28")
         style = ttk.Style()
         style.theme_use("clam")
@@ -106,13 +106,16 @@ class App:
         ttk.Label(body, textvariable=self.reference, style="Muted.TLabel",
                   wraplength=470).pack(anchor="w", pady=(5, 10))
         self.sensitivity = tk.DoubleVar(value=self.settings.sensitivity)
+        self.shout = tk.DoubleVar(value=self.settings.shout_db)
         self.opacity = tk.DoubleVar(value=self.settings.opacity)
         self.depth = tk.DoubleVar(value=self.settings.depth)
         self.sensitivity_label = tk.StringVar()
+        self.shout_label = tk.StringVar()
         self.opacity_label = tk.StringVar()
         self.depth_label = tk.StringVar()
         for label, variable, minimum, maximum in (
             (self.sensitivity_label, self.sensitivity, -2, 8),
+            (self.shout_label, self.shout, 6, 30),
             (self.opacity_label, self.opacity, 0.1, 0.75),
             (self.depth_label, self.depth, 0.02, 0.15),
         ):
@@ -317,16 +320,20 @@ class App:
         if normal is None:
             self.reference.set("Calibra para aprender tu voz normal. Sin calibrar no hay alertas.")
         else:
-            self.reference.set(f"Tu voz normal: {normal:.1f} dBFS | "
-                               f"Alerta desde +{3 + self.settings.sensitivity:.1f} dB.\n"
+            start, _, end = alert_limits(self.settings)
+            self.reference.set(f"Tu voz normal: {normal:.1f} dBFS | Verde desde +{start:.1f} dB, "
+                               f"rojo gradual en +{end:.1f} dB, grito +{self.settings.shout_db:.1f} dB.\n"
                                "Recalibra si cambias la ganancia o distancia al microfono.")
 
     def _sliders_changed(self, value: str = "") -> None:
         self.settings.sensitivity = round(self.sensitivity.get(), 1)
+        self.settings.shout_db = round(self.shout.get(), 1)
         self.settings.opacity = self.opacity.get()
         self.settings.depth = self.depth.get()
         self.sensitivity_label.set(f"Tolerancia: alerta desde +{3 + self.settings.sensitivity:.1f} dB "
                                    "(izquierda = mas sensible)")
+        self.shout_label.set(f"Grito: rojo inmediato desde +{self.settings.shout_db:.1f} dB, "
+                             "aunque dure un instante")
         self.opacity_label.set(f"Intensidad del borde: {self.settings.opacity:.0%}")
         self.depth_label.set(f"Profundidad maxima hacia dentro: {self.settings.depth:.0%}")
         self._reference_text()
@@ -345,7 +352,7 @@ class App:
             self._error("El efecto de pantalla no esta disponible.")
         else:
             self.preview_until = time.monotonic() + 5
-            self.status.set("Vista previa: amarillo, naranja y rojo durante 5 segundos.")
+            self.status.set("Vista previa: de verde a rojo, creciendo hacia dentro, durante 5 segundos.")
 
     def _set_spl(self) -> None:
         value = simpledialog.askstring(
@@ -387,13 +394,17 @@ class App:
         self.meter.delete("all")
         self.meter.create_rectangle(0, 4, width, 19, fill="#283b50", outline="")
         fraction = min(1, max(0, (level + 80) / 80))
-        self.meter.create_rectangle(0, 4, width * fraction, 19, fill=COLORS[self.state], outline="")
+        color = ramp_color(self.strength) if self.state else COLORS[0]
+        self.meter.create_rectangle(0, 4, width * fraction, 19, fill=color, outline="")
         for value in (-80, -60, -40, -20, 0):
             x = min(width - 12, max(12, width * (value + 80) / 80))
             self.meter.create_text(x, 34, text=str(value), fill="#a7b7ca", font=("Segoe UI", 8))
         if self.settings.normal_dbfs is not None:
             x = width * min(1, max(0, (self.settings.normal_dbfs + 80) / 80))
             self.meter.create_line(x, 0, x, 23, fill="#e8eef7", width=2)
+            shout = self.settings.normal_dbfs + self.settings.shout_db
+            x = width * min(1, max(0, (shout + 80) / 80))
+            self.meter.create_line(x, 0, x, 23, fill=COLORS[3], width=2, dash=(3, 2))
 
     def _tick(self) -> None:
         now = time.monotonic()
@@ -457,25 +468,27 @@ class App:
             elif level < self.settings.noise_dbfs + 6:
                 self.state_text.set("Silencio / ruido de fondo")
             else:
-                self.state_text.set(STATE_NAMES[self.state])
-            self.state_label.configure(foreground=COLORS[self.state])
+                self.state_text.set("Grito detectado" if self.tracker.shouting else STATE_NAMES[self.state])
+            self.state_label.configure(foreground=ramp_color(self.strength) if self.state else COLORS[0])
         if self.running and self.last_reading and now - self.last_reading.timestamp > 1.5:
             self._stop()
             self.capture_error = "El microfono dejo de entregar audio."
             self._error("El microfono dejo de entregar audio. Detenlo y revisa su conexion.")
         target = self.strength if self.running and self.settings.overlay_enabled else 0.0
-        display_state = self.state
+        urgent = self.running and self.tracker.shouting
         if self.calibration_phase or self.closing:
             target = 0.0
+            urgent = False
         elif self.preview_until > now:
-            display_state = min(3, 1 + int((5 - (self.preview_until - now)) / 1.67))
-            target = display_state / 3
+            progress = min(1.0, (5 - (self.preview_until - now)) / 4)
+            target = 0.1 + 0.9 * progress
+            urgent = False
         elif self.preview_until:
             self.preview_until = 0
             self.status.set("Vista previa finalizada." if not self.running else "Escuchando.")
         if self.overlay:
             try:
-                self.overlay.render(target, display_state, self.settings.opacity, self.settings.depth, dt)
+                self.overlay.render(target, self.settings.opacity, self.settings.depth, dt, urgent)
             except (OSError, tk.TclError) as exc:
                 self.overlay.destroy()
                 self.overlay = None

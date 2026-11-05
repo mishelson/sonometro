@@ -1,4 +1,4 @@
-import ctypes
+﻿import ctypes
 import sys
 import tempfile
 import time
@@ -44,34 +44,42 @@ class WindowsTests(unittest.TestCase):
         before = user32.GetForegroundWindow()
         try:
             for _ in range(60):
-                overlay.render(1, 3, 0.45, 0.10, 0.033)
+                overlay.render(1, 0.45, 0.10, 0.033)
                 self.root.update()
-            self.assertEqual(len(overlay.windows), 24)
+            self.assertEqual(len(overlay.windows), 1)
             self.assertEqual(user32.GetForegroundWindow(), before)
-            for _, handle in overlay.windows:
-                style = overlay.get_style(handle, -20)
-                self.assertEqual(style & (0x80000 | 0x20 | 0x8000000 | 0x80),
-                                 0x80000 | 0x20 | 0x8000000 | 0x80)
-                self.assertTrue(user32.IsWindowVisible(handle))
-                self.assertTrue(style & 0x8)
+            handle = overlay.handle
+            style = overlay.get_style(handle, -20)
+            self.assertEqual(style & (0x80000 | 0x20 | 0x8000000 | 0x80),
+                             0x80000 | 0x20 | 0x8000000 | 0x80)
+            self.assertTrue(style & 0x8)
+            self.assertTrue(user32.IsWindowVisible(handle))
             rect = wintypes.RECT()
-            self.assertTrue(user32.GetWindowRect(overlay.windows[0][1], ctypes.byref(rect)))
-            self.assertEqual(rect.left, 0)
-            self.assertEqual(rect.top, 0)
-            self.assertEqual(rect.right, user32.GetSystemMetrics(0))
-            self.assertGreater(rect.bottom, 1)
-            hit = user32.WindowFromPoint(wintypes.POINT(rect.right // 2, rect.bottom // 2))
-            self.assertNotIn(hit, [handle for _, handle in overlay.windows])
+            self.assertTrue(user32.GetWindowRect(handle, ctypes.byref(rect)))
+            width, height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+            self.assertEqual((rect.left, rect.top, rect.right, rect.bottom), (0, 0, width, height))
+            hit = user32.WindowFromPoint(wintypes.POINT(width // 2, height // 2))
+            self.assertNotEqual(hit, handle)
+            alpha = (overlay.pixels[:, width // 2] >> 24).astype(int)
+            edge = int(overlay.pixels[0, width // 2])
+            self.assertGreater((edge >> 16) & 255, 4 * ((edge >> 8) & 255), "rojo intenso en el borde")
+            self.assertGreater(alpha[0], 150)
+            self.assertEqual(alpha[height // 2], 0)
+            top = alpha[:height // 2]
+            self.assertTrue((top[1:] <= top[:-1]).all(), "el borde debe desvanecerse hacia dentro")
+            self.assertLessEqual(int(abs(top[1:] - top[:-1]).max()), 3, "sin escalones visibles")
+            self.assertGreater(int((top > 0).sum()), 20)
             overlay.hide()
-            for _, handle in overlay.windows:
-                self.assertFalse(user32.IsWindowVisible(handle))
-            overlay.render(0, 0, 0.45, 0.10, 0.033)
+            self.assertFalse(user32.IsWindowVisible(handle))
+            overlay.render(0, 0.45, 0.10, 0.033)
             self.assertFalse(overlay.visible)
-            overlay.render(0.8, 2, 0.45, 0.10, 0.033)
+            overlay.render(0.8, 0.45, 0.10, 0.033)
             self.assertTrue(overlay.visible)
             for _ in range(100):
-                overlay.render(0, 0, 0.45, 0.10, 0.033)
+                overlay.render(0, 0.45, 0.10, 0.033)
             self.assertFalse(overlay.visible)
+            overlay.render(1, 0.45, 0.10, 0.033, urgent=True)
+            self.assertGreater(overlay.strength, 0.5)
         finally:
             overlay.destroy()
 

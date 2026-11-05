@@ -9,8 +9,8 @@ import numpy as np
 
 from sonometro_audio import Capture, Device
 from sonometro_core import (
-    FLOOR_DBFS, LevelTracker, Reading, Settings, calibrate, legacy_device_index,
-    load_settings, measure_pcm, save_settings,
+    COLORS, FLOOR_DBFS, LevelTracker, Reading, Settings, alert_limits, calibrate,
+    legacy_device_index, load_settings, measure_pcm, ramp_color, save_settings,
 )
 
 
@@ -113,6 +113,58 @@ class TrackerTests(unittest.TestCase):
         _, output = self.settle(-30, tracker, 5)
         self.assertEqual(output[1:], (0, 0.0))
 
+    def test_short_shout_triggers_red_immediately_despite_high_tolerance(self) -> None:
+        self.settings.sensitivity = 8
+        tracker = LevelTracker()
+        tracker.update(Reading(0, -30), self.settings)
+        t = 0.0
+        output = (0.0, 0, 0.0)
+        while t < 0.25:
+            t += 0.025
+            output = tracker.update(Reading(t, -12), self.settings)
+            if output[1] == 3:
+                break
+        self.assertEqual(output[1:], (3, 1.0))
+        self.assertLess(t, 0.25)
+        self.assertTrue(tracker.shouting)
+        # The red alert is held briefly after the shout ends, then released.
+        output = tracker.update(Reading(t + 0.5, -30), self.settings)
+        self.assertEqual(output[1], 3)
+        _, output = self.settle(-30, tracker, t + 2)
+        self.assertEqual(output[1:], (0, 0.0))
+        self.assertFalse(tracker.shouting)
+
+    def test_shout_needs_to_last_a_moment(self) -> None:
+        tracker = LevelTracker()
+        tracker.update(Reading(0, -30), self.settings)
+        tracker.update(Reading(0.025, -5), self.settings)
+        tracker.update(Reading(0.05, -5), self.settings)
+        output = tracker.update(Reading(0.075, -30), self.settings)
+        self.assertNotEqual(output[1], 3)
+        self.assertFalse(tracker.shouting)
+
+    def test_shout_below_threshold_uses_gradual_path(self) -> None:
+        self.settings.sensitivity = 8
+        tracker, output = self.settle(-17)
+        self.assertIn(output[1], (1, 2))
+        self.assertLess(output[2], 1.0)
+        self.assertFalse(tracker.shouting)
+
+    def test_gradual_ramp_goes_from_green_to_red_before_shout(self) -> None:
+        intensities = []
+        for excess in (3.5, 6, 9, 13.9):
+            _, output = self.settle(-30 + excess)
+            intensities.append(output[2])
+        self.assertEqual(intensities, sorted(intensities))
+        self.assertLess(intensities[0], 0.2)
+        self.assertEqual(intensities[-1], 1.0)
+        self.assertEqual(ramp_color(0.1), COLORS[0])
+        self.assertEqual(ramp_color(1.0), COLORS[3])
+        self.settings.sensitivity = 8
+        start, middle, end = alert_limits(self.settings)
+        self.assertLess(start, middle)
+        self.assertLess(end, self.settings.shout_db)
+
 
 class ConfigTests(unittest.TestCase):
     def test_round_trip_and_spl_reference(self) -> None:
@@ -132,7 +184,7 @@ class ConfigTests(unittest.TestCase):
         cases = ["[]", "{", '{"version":2}', '{"opacity":9}', '{"opacity":NaN}',
                  '{"overlay_enabled":"false"}', '{"normal_dbfs":-30}',
                  '{"device_key":1}', '{"surprise":true}', '{"spl_offset":90}',
-                 '{"version":true}', '{"depth":null}', '{"sensitivity":true}']
+                 '{"version":true}', '{"depth":null}', '{"sensitivity":true}', '{"shout_db":2}']
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "config.json"
             for content in cases:
