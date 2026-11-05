@@ -1,8 +1,9 @@
 # Sonometro: tu voz, en equilibrio
 
 Indicador visual local para Windows: cuando superas tu volumen habitual,
-aparece un resplandor difuminado en los bordes de la pantalla que pasa
-gradualmente de verde a amarillo, naranja y rojo, creciendo hacia dentro,
+aparece un contorno verde fino en los bordes de la pantalla; si sigues
+subiendo, pasa a amarillo, naranja y rojo con un resplandor difuminado que
+crece hacia dentro,
 como un efecto de dano en un videojuego. Si gritas de golpe, el rojo
 aparece al instante como alarma.
 Con silencio o voz normal, los bordes permanecen ocultos.
@@ -46,8 +47,13 @@ y seguridad > Microfono.
 6. Ajusta intensidad y profundidad. **Vista previa** muestra el efecto
    durante 5 segundos sin necesitar captura ni calibracion, incluso con
    las alertas desactivadas. No bloquea clics ni toma el foco.
-7. **Detener** libera el microfono. Cerrar la ventana tambien detiene
-   la captura; no queda ejecutandose en la bandeja del sistema.
+7. **Detener** libera el microfono.
+8. La **X** de la ventana la oculta en la bandeja del sistema (junto al
+   reloj) y el monitoreo continua. El icono cambia de color segun tu nivel
+   y muestra barras de pausa cuando esta detenido. Doble clic lo vuelve a
+   mostrar; con clic derecho tienes **Mostrar ventana**, **Pausar** (libera
+   el microfono) / **Reanudar** y **Salir**, que cierra la aplicacion por
+   completo.
 
 El medidor usa verde para el nivel normal, y texto ademas del color.
 La linea blanca marca la referencia personal y la discontinua roja el
@@ -92,8 +98,9 @@ envia. Solo se conservan ajustes y referencias numericas. El microfono
 permanece abierto exclusivamente al iniciar el monitoreo.
 
 El efecto se dibuja en el monitor principal con una unica ventana nativa
-transparente por pixel: un degradado suave con esquinas redondeadas que
-crece hacia dentro y, en rojo, late suavemente. No toma el foco y deja
+transparente por pixel. En verde es solo un contorno fino; desde amarillo
+se convierte en un degradado suave que crece hacia dentro con el mismo
+ancho en lados y esquinas, y en rojo late suavemente. No toma el foco y deja
 pasar clics. No admite varios monitores ni garantiza
 superposicion sobre juegos en pantalla completa exclusiva o escritorios
 protegidos de Windows. Puedes desactivar los bordes y conservar el medidor.

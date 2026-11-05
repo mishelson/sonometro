@@ -8,9 +8,31 @@ from ctypes import wintypes
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 from sonometro_audio import Device
 from sonometro_core import Reading, Settings, load_settings
 from sonometro_overlay import Overlay, enable_dpi_awareness
+
+
+class FakeTray:
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+        self.updates: list[tuple] = []
+        self.notifications: list[str] = []
+        self.stopped = False
+
+    def next_command(self) -> str | None:
+        return self.commands.pop(0) if self.commands else None
+
+    def update(self, *args) -> None:
+        self.updates.append(args)
+
+    def notify(self, message: str) -> None:
+        self.notifications.append(message)
+
+    def stop(self) -> None:
+        self.stopped = True
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows desktop required")
@@ -25,6 +47,9 @@ class WindowsTests(unittest.TestCase):
         self.root.update()
         self.callback_errors: list[str] = []
         self.root.report_callback_exception = lambda *args: self.callback_errors.append(str(args))
+        tray_patch = patch("sonometro.Tray", FakeTray)
+        tray_patch.start()
+        self.addCleanup(tray_patch.stop)
 
     def tearDown(self) -> None:
         for callback in self.root.tk.call("after", "info"):
@@ -69,6 +94,15 @@ class WindowsTests(unittest.TestCase):
             self.assertTrue((top[1:] <= top[:-1]).all(), "el borde debe desvanecerse hacia dentro")
             self.assertLessEqual(int(abs(top[1:] - top[:-1]).max()), 3, "sin escalones visibles")
             self.assertGreater(int((top > 0).sum()), 20)
+            band = int((top > 0).sum())
+            corner = np.array([int(overlay.pixels[i, i]) >> 24 for i in range(height // 2)])
+            self.assertLessEqual(int((corner > 0).sum()), band * 1.15, "las esquinas no deben invadir mas")
+            overlay.hide()
+            for _ in range(60):
+                overlay.render(0.25, 0.45, 0.10, 0.033)
+            outline = (overlay.pixels[:height // 2, width // 2] >> 24).astype(int)
+            self.assertGreater(outline[0], 0)
+            self.assertLessEqual(int((outline > 0).sum()), min(width, height) * 0.02, "verde: contorno fino")
             overlay.hide()
             self.assertFalse(user32.IsWindowVisible(handle))
             overlay.render(0, 0.45, 0.10, 0.033)
@@ -138,6 +172,53 @@ class WindowsTests(unittest.TestCase):
                 self.assertEqual(app.settings.spl_offset, 90)
                 app.overlay.destroy()
                 app.overlay = None
+
+    def test_tray_hides_window_and_routes_commands(self) -> None:
+        import sonometro
+
+        device = Device(7, "Prueba", "WASAPI", 1, 48000)
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            with patch.object(sonometro, "BASE_DIR", base), \
+                    patch.object(sonometro, "CONFIG_PATH", base / "config.json"), \
+                    patch.object(sonometro, "input_devices", return_value=([device], 7)):
+                app = sonometro.App(self.root)
+                tray = app.tray
+                self.assertIsInstance(tray, FakeTray)
+                app._close()
+                app._close()
+                self.root.update()
+                self.assertEqual(self.root.state(), "withdrawn")
+                self.assertFalse(app.closing)
+                self.assertEqual(len(tray.notifications), 1)
+                tray.commands.append("show")
+                app._tray_tick()
+                self.root.update()
+                self.assertEqual(self.root.state(), "normal")
+                self.assertEqual(tray.updates[-1][0], sonometro.PAUSED_COLOR)
+                self.assertTrue(tray.updates[-1][1])
+                with patch.object(app, "_toggle") as toggle, patch.object(app, "_quit") as quit_:
+                    tray.commands.extend(["toggle", "quit"])
+                    app._tray_tick()
+                    toggle.assert_called_once()
+                    quit_.assert_called_once()
+                app._quit()
+                self.assertTrue(app.closing)
+                app.overlay.destroy()
+                app.overlay = None
+
+    def test_real_tray_icon_starts_updates_and_stops(self) -> None:
+        from sonometro_tray import Tray
+
+        tray = Tray()
+        try:
+            tray.update("#ff0a0a", False, True, "Sonometro: prueba")
+            tray.update("#ff0a0a", False, True, "Sonometro: prueba")
+            self.assertEqual(tray.appearance, ("#ff0a0a", False))
+            self.assertIsNone(tray.next_command())
+        finally:
+            tray.stop()
+        self.assertFalse(tray.thread.is_alive())
 
     def test_no_devices_and_ambiguous_profile(self) -> None:
         import sonometro

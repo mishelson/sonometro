@@ -1,12 +1,12 @@
 {
   "version": 1,
   "device_key": "MME|Micr\u00c3\u00b3fono (TONOR TC777 Pro Mic)|2|44100",
-  "noise_dbfs": -91.17460231935222,
-  "normal_dbfs": -38.407848738711394,
+  "noise_dbfs": -70.88514903719785,
+  "normal_dbfs": -37.81235320996946,
   "spl_offset": null,
-  "sensitivity": -1.4,
-  "shout_db": 15.0,
-  "opacity": 0.45,
-  "depth": 0.1,
+  "sensitivity": -0.7,
+  "shout_db": 16.0,
+  "opacity": 0.2893478260869565,
+  "depth": 0.06323913043478262,
   "overlay_enabled": true
 }

@@ -16,6 +16,10 @@ MAX_DEPTH = 0.15
 FADE_REACH = 2.3
 # Red reaches a little further inward than the configured depth.
 RED_REACH = 1.2
+# While green the alert is only a thin outline; it starts growing inward once it turns yellow.
+GREEN_END = 0.4
+OUTLINE_REACH = 0.014
+CORNER_SHARPNESS = 6.0
 
 
 def enable_dpi_awareness() -> None:
@@ -45,14 +49,15 @@ class BLENDFUNCTION(ctypes.Structure):
                 ("SourceConstantAlpha", ctypes.c_ubyte), ("AlphaFormat", ctypes.c_ubyte)]
 
 
-def edge_distance(ys: np.ndarray, xs: np.ndarray, width: int, height: int, radius: float) -> np.ndarray:
-    """Distance in pixels from the screen edge, with rounded inner corners."""
-    dx = np.minimum(xs, width - 1 - xs).astype(np.float32)
-    dy = np.minimum(ys, height - 1 - ys).astype(np.float32)
-    straight = np.minimum(dx, dy)
-    rounded = radius - np.hypot(np.maximum(radius - dx, 0), np.maximum(radius - dy, 0))
-    near_corner = (dx < radius) & (dy < radius)
-    return np.maximum(0, np.where(near_corner, rounded, straight))
+def edge_distance(ys: np.ndarray, xs: np.ndarray, width: int, height: int, sharpness: float) -> np.ndarray:
+    """Distance in pixels from the nearest screen edge.
+
+    A soft minimum (p-norm) blends the two edges at the corners: no diagonal crease, and the
+    corner only reaches about 12% further than the straight edges.
+    """
+    dx = np.minimum(xs, width - 1 - xs).astype(np.float64) + 1
+    dy = np.minimum(ys, height - 1 - ys).astype(np.float64) + 1
+    return np.maximum(0, (dx ** -sharpness + dy ** -sharpness) ** (-1 / sharpness) - 1)
 
 
 class Overlay:
@@ -173,21 +178,33 @@ class Overlay:
         for rows, cols in regions:
             ys = np.arange(rows.start, rows.stop)[:, None]
             xs = np.arange(cols.start, cols.stop)[None, :]
-            distance = edge_distance(ys, xs, width, height, float(m))
+            distance = edge_distance(ys, xs, width, height, CORNER_SHARPNESS)
             self.strips.append(((rows, cols), np.minimum(np.rint(distance), m).astype(np.uint16)))
         self.last_key = None
         self.window.geometry(f"{width}x{height}+0+0")
 
-    def _palette(self, opacity: float, depth: float, pulse: float) -> np.ndarray:
+    def _reach(self, depth: float) -> float:
+        """How far the glow fades inward: a thin outline while green, growing from yellow to red."""
         smallest = min(self.size)
+        outline = smallest * OUTLINE_REACH
+        if self.strength <= GREEN_END:
+            return outline
+        growth = ((self.strength - GREEN_END) / (1 - GREEN_END)) ** 0.85
         redness = min(1.0, max(0.0, (self.strength - 0.75) / 0.22))
-        grow = self.strength ** 0.75 * (1 + (RED_REACH - 1) * redness)
-        reach = max(6.0, smallest * depth * FADE_REACH * grow)
+        full = smallest * depth * FADE_REACH * (1 + (RED_REACH - 1) * redness)
+        return outline + (max(outline, full) - outline) * growth
+
+    def _palette(self, opacity: float, depth: float, pulse: float) -> np.ndarray:
+        redness = min(1.0, max(0.0, (self.strength - 0.75) / 0.22))
+        reach = max(4.0, self._reach(depth))
         s = np.arange(self.margin + 1, dtype=np.float32) / reach
         falloff = np.clip(1 - s, 0, 1)
         # Strongest at the very edge with a long soft tail, like a damage vignette; no plateau or seam.
-        shape = falloff ** 2.4
-        peak = min(0.95, opacity * pulse * (1 + 1.1 * redness) * (0.35 + 0.65 * self.strength ** 0.5))
+        # The green outline uses a gentler curve so the thin line stays readable.
+        greenness = min(1.0, max(0.0, (GREEN_END + 0.15 - self.strength) / 0.15))
+        shape = falloff ** (2.4 - 0.9 * greenness)
+        peak = min(0.95, opacity * pulse * (1 + 1.1 * redness + 0.5 * greenness)
+                   * (0.35 + 0.65 * self.strength ** 0.5))
         alpha = np.rint(shape * peak * 255).astype(np.uint32)
         color = ramp_color(self.strength)
         r, g, b = (np.uint32(int(color[i:i + 2], 16)) for i in (1, 3, 5))

@@ -12,6 +12,7 @@ from sonometro_core import (
     alert_limits, calibrate, legacy_device_index, load_settings, ramp_color, save_settings,
 )
 from sonometro_overlay import Overlay, enable_dpi_awareness
+from sonometro_tray import PAUSED_COLOR, Tray
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -51,6 +52,12 @@ class App:
             self.overlay = Overlay(root)
         except (OSError, tk.TclError) as exc:
             startup_errors.append(f"No se pudo preparar el efecto de pantalla: {exc}")
+        self.tray: Tray | None = None
+        self.tray_hint_shown = False
+        try:
+            self.tray = Tray()
+        except Exception as exc:  # pystray backends raise varied errors; the app works without a tray.
+            LOG.warning("Sin icono en la bandeja: %s", exc)
         self._build_ui()
         self._refresh_devices(initial=True)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
@@ -134,7 +141,8 @@ class App:
         self.spl_button = ttk.Button(extras, text="Referencia dB SPL", command=self._set_spl)
         self.spl_button.pack(side="left", padx=8)
         ttk.Label(body, text="Audio local, sin grabaciones. El microfono tambien capta ruido\n"
-                  "y otras voces. dBFS no equivale a decibelios acusticos.",
+                  "y otras voces. dBFS no equivale a decibelios acusticos.\n"
+                  "La X oculta la ventana en la bandeja: pausa o sal desde su icono.",
                   style="Muted.TLabel", wraplength=470).pack(anchor="w", pady=(4, 0))
         self._sliders_changed()
         self._reference_text()
@@ -144,6 +152,7 @@ class App:
         LOG.error(text)
         self.status.set(text.splitlines()[0])
         if not self.closing:
+            self.root.deiconify()
             messagebox.showerror("Sonometro", text, parent=self.root)
 
     def _save(self) -> None:
@@ -495,14 +504,58 @@ class App:
                 self._error(f"Se desactivo el efecto de pantalla por un error: {exc}")
         self._draw_meter(self.tracker.level if self.running else FLOOR_DBFS)
         self._buttons()
+        self._tray_tick()
         if self.closing and not self.capture.alive:
             if self.overlay:
                 self.overlay.destroy()
+            if self.tray:
+                self.tray.stop()
+                self.tray = None
             self.root.destroy()
             return
         self.root.after(33, self._tick)
 
+    def _tray_tick(self) -> None:
+        if self.tray is None:
+            return
+        while (command := self.tray.next_command()) is not None:
+            if command == "show":
+                self._show_window()
+            elif command == "toggle":
+                self._toggle()
+            elif command == "quit":
+                self._quit()
+                return
+        busy = self.capture.alive
+        if not self.running:
+            color, title = PAUSED_COLOR, "Sonometro: en pausa"
+        elif self.settings.normal_dbfs is None:
+            color, title = COLORS[0], "Sonometro: escuchando (sin calibrar)"
+        else:
+            color = COLORS[self.state]
+            title = "Sonometro: " + ("grito detectado" if self.tracker.shouting else STATE_NAMES[self.state].lower())
+        try:
+            self.tray.update(color, not busy, busy or self.selected is not None, title)
+        except (OSError, ValueError, RuntimeError) as exc:
+            LOG.warning("No se pudo actualizar el icono de la bandeja: %s", exc)
+
+    def _show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
     def _close(self) -> None:
+        """The window's X hides to the notification area; use Salir there to quit."""
+        if self.tray is None:
+            self._quit()
+            return
+        self._save()
+        self.root.withdraw()
+        if not self.tray_hint_shown:
+            self.tray_hint_shown = True
+            self.tray.notify("Sigo en la bandeja. Clic derecho en el icono para pausar o salir.")
+
+    def _quit(self) -> None:
         if self.closing:
             return
         self._save()
