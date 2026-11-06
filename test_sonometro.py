@@ -167,6 +167,12 @@ class TrackerTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_save_creates_missing_parent_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "app-data" / "config.json"
+            save_settings(path, Settings())
+            self.assertEqual(load_settings(path), Settings())
+
     def test_round_trip_and_spl_reference(self) -> None:
         settings = Settings(device_key="mic", noise_dbfs=-70, normal_dbfs=-30, spl_offset=90)
         with tempfile.TemporaryDirectory() as folder:

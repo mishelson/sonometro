@@ -26,6 +26,21 @@ No necesitas activar el entorno. Si Windows bloquea el microfono, habilita
 el acceso para aplicaciones de escritorio en Configuracion > Privacidad
 y seguridad > Microfono.
 
+## Crear un ejecutable de Windows
+
+Con el entorno virtual instalado, ejecuta desde PowerShell:
+
+```powershell
+.\build.ps1
+```
+
+El ejecutable de un solo archivo se crea en `dist\Sonometro.exe`. Los ajustes
+y la calibracion se guardan en `%APPDATA%\Sonometro\sonometro_config.json`;
+el ejecutable no necesita permisos de administrador y no modifica sus propios
+archivos. La primera compilacion requiere internet para instalar PyInstaller.
+Distribuye `Sonometro.exe` en Windows; no se incluye la configuracion local
+del equipo donde se compilo.
+
 ## Usar
 
 1. Selecciona el microfono. El nombre incluye su API e indice para distinguir

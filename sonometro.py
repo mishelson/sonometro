@@ -1,5 +1,7 @@
 import logging
 import math
+import os
+import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -15,8 +17,10 @@ from sonometro_overlay import Overlay, enable_dpi_awareness
 from sonometro_tray import PAUSED_COLOR, Tray
 
 
-BASE_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = BASE_DIR / "sonometro_config.json"
+FROZEN = getattr(sys, "frozen", False)
+BASE_DIR = Path(sys.executable if FROZEN else __file__).resolve().parent
+CONFIG_DIR = Path(os.environ["APPDATA"]) / "Sonometro" if FROZEN else BASE_DIR
+CONFIG_PATH = CONFIG_DIR / "sonometro_config.json"
 LOG = logging.getLogger("sonometro")
 
 

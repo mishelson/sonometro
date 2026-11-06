@@ -103,6 +103,7 @@ def load_settings(path: Path) -> Settings:
 
 def save_settings(path: Path, settings: Settings) -> None:
     settings.validate()
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     try:
         temporary.write_text(json.dumps(asdict(settings), indent=2) + "\n", encoding="utf-8")

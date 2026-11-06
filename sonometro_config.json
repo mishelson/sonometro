@@ -4,9 +4,9 @@
   "noise_dbfs": -70.88514903719785,
   "normal_dbfs": -37.81235320996946,
   "spl_offset": null,
-  "sensitivity": -0.7,
+  "sensitivity": 3.9,
   "shout_db": 16.0,
   "opacity": 0.2893478260869565,
-  "depth": 0.06323913043478262,
+  "depth": 0.08443478260869566,
   "overlay_enabled": true
 }
